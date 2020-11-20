@@ -1,5 +1,13 @@
-import crypto from '@trust/webcrypto'
+import webcrypto from '@trust/webcrypto'
 import util from 'util'
+
+try {
+  global.crypto = global.crypto || webcrypto
+  if (window) {
+    window.crypto = window.crypto || webcrypto
+  }
+} catch (error) {}
+
 
 function decode(buffer) {
   return new util.TextDecoder().decode(buffer)
