@@ -1,28 +1,89 @@
-const { RSA, AES } = require('./utils')
+import { RSA, AES } from './utils'
 
-// const run = async () => {
-//   const key = await generateKey()
-//   const exportedKey = await exportKey(key)
-//   const obj = { super: 'ça' }
-//   const encrypted = await encrypt(key, JSON.stringify(obj))
-//   const decrypted = await decrypt(key, encrypted)
-//   console.log('exportedKey', exportedKey)
-//   console.log('encrypted', encrypted)
-//   console.log('decrypted', JSON.parse(decrypted))
-// }
+// Client
+export class CryptoClient {
+  hashedKey = null
+  hashedPublicKey = null
+  constructor(hashedKey) {
+    if (hashedKey) {
+      this.hashedKey = hashedKey
+    }
+  }
 
-const run = async () => {
-  const keyPair = await RSA.generateKeyPair()
-  const exportedPublicKey = await RSA.exportKey(keyPair.publicKey)
-  const importedPublicKey = await RSA.importKey(exportedPublicKey)
-  // console.log(exportedPublicKey)
-  // console.log(importedPublicKey)
-  const obj = { super: 'ça', ok: "mais" }
-  const encrypted = await RSA.encrypt(importedPublicKey, obj)
-  console.log('encrypted', encrypted)
-  const decrypted = await RSA.decrypt(keyPair.privateKey, encrypted)
+  async init() {
+    if (!this.hashedKey) {
+      const key = await AES.generateKey()
+      this.hashedKey = await AES.exportKey(key)
+    }
+  }
 
-  console.log('decrypted', JSON.parse(decrypted))
+  setPublicKey(hashedPublicKey) {
+    this.hashedPublicKey = hashedPublicKey
+  }
+
+  /**
+   * Used to send the AES key to the server securely using the provided RSA PublicKey
+   * @param {*} hashedPublicKey
+   */
+  async encryptKey() {
+    const publicKey = await RSA.importPublicKey(this.hashedPublicKey)
+    return RSA.encrypt(publicKey, this.hashedKey)
+  }
+
+  /**
+   * Used to encrypt the body with the AES key to let the server securely read it
+   * @param {*} hashedPublicKey
+   * @param {*} body
+   */
+  async encryptBody(body) {
+    const publicKey = await RSA.importPublicKey(this.hashedPublicKey)
+    return RSA.encrypt(publicKey, body)
+  }
+
+  /**
+   * Used to decrypt the body with the AES key (safely encrypted by the server)
+   * @param {*} encryptedBody
+   */
+  async decrypteBody(encryptedBody) {
+    const key = await AES.importKey(this.hashedKey)
+    return AES.decrypt(key, encryptedBody)
+  }
 }
 
-run()
+export class CryptoServer {
+  hashedKey = null
+  hashedPublicKey = null
+  hashedPrivateKey = null
+  constructor({ hashedPublicKey, hashedPrivateKey, hashedKey } = {}) {
+    if (hashedPublicKey) this.hashedPublicKey = hashedPublicKey
+    if (hashedPrivateKey) this.hashedPrivateKey = hashedPrivateKey
+    if (hashedKey) this.hashedKey = hashedKey
+  }
+
+  async init() {
+    if (!this.hashedPublicKey || !this.hashedPrivateKey) {
+      const keyPair = await RSA.generateKeyPair()
+      const { publicKey, privateKey } = await RSA.exportKeyPair(keyPair)
+      this.hashedPublicKey = publicKey
+      this.hashedPrivateKey = privateKey
+    }
+  }
+
+  async setKey(encryptedHashedKey) {
+    const privateKey = await RSA.importPrivateKey(this.hashedPrivateKey)
+    const decryptedKey = await RSA.decrypt(privateKey, encryptedHashedKey)
+    this.hashedKey = decryptedKey
+  }
+
+  async decryptBody(encryptedBody) {
+    const privateKey = await RSA.importPrivateKey(this.hashedPrivateKey)
+    return RSA.decrypt(privateKey, encryptedBody)
+  }
+
+  async encryptBody(body) {
+    const key = await AES.importKey(this.hashedKey)
+    return AES.encrypt(key, body)
+  }
+}
+
+export { RSA, AES }

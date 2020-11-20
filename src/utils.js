@@ -1,16 +1,17 @@
-const crypto = require('@trust/webcrypto')
+import crypto from '@trust/webcrypto'
+import util from 'util'
 
 function decode(buffer) {
-  return new TextDecoder().decode(buffer)
+  return new util.TextDecoder().decode(buffer)
 }
 
 function encode(data) {
   if (data instanceof Uint8Array) {
     return data
   } else if (typeof data === 'string') {
-    return new TextEncoder().encode(data)
+    return new util.TextEncoder().encode(data)
   } else if (typeof data === 'object') {
-    return new TextEncoder().encode(JSON.stringify(data))
+    return new util.TextEncoder().encode(JSON.stringify(data))
   }
 }
 
@@ -22,52 +23,52 @@ function toHash(buffer) {
   return buffer.toString('hex').toString('base64')
 }
 
-async function generateVector(vectorLength = 12) {
-  return crypto.getRandomValues(new Uint8Array(vectorLength))
+async function generateCounter(counterLength = 16) {
+  return crypto.getRandomValues(new Uint8Array(counterLength))
 }
 
-const AES = {
-  // KEY
+export const AES = {
   async generateKey() {
-    return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
+    return crypto.subtle.generateKey({ name: 'AES-CTR', length: 128 }, true, ['encrypt', 'decrypt'])
   },
+
   async exportKey(key) {
     return crypto.subtle.exportKey('raw', key).then(toHash)
   },
+
   async importKey(hashedKey) {
     let bufferKey = hashedKey
     if (!Buffer.isBuffer(bufferKey)) bufferKey = fromHash(bufferKey)
-    return crypto.subtle.importKey('raw', bufferKey, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt'])
+    return crypto.subtle.importKey('raw', bufferKey, { name: 'AES-CTR' }, true, ['encrypt', 'decrypt'])
   },
 
-  // Encryption/Decryption
-  encryptedToHashed(encrypted, vector) {
-    return toHash(Buffer.concat([vector, new Uint8Array(encrypted)]))
+  encryptedToHashed(encrypted, counter) {
+    return toHash(Buffer.concat([counter, new Uint8Array(encrypted)]))
   },
-  hashedToEncryptedAndVector(hashed) {
+
+  hashedToEncryptedAndCounter(hashed, counterLength = 16) {
     const buffer = Buffer.from(hashed.toString('hex'), 'hex')
-    const vector = buffer.slice(0, 12)
-    const encrypted = buffer.slice(12)
-    return { vector, encrypted }
+    const counter = buffer.slice(0, counterLength)
+    const encrypted = buffer.slice(counterLength)
+    return { counter, encrypted }
   },
-  async encrypt(key, data, vector) {
-    if (!vector) vector = await generateVector()
-    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: vector, tagLength: 128 }, key, encode(data))
-    const hashed = this.encryptedToHashed(encrypted, vector)
+
+  async encrypt(key, data, counter) {
+    if (!counter) counter = await generateCounter()
+    const encrypted = await crypto.subtle.encrypt({ name: 'AES-CTR', counter, length: 128 }, key, encode(data))
+    const hashed = this.encryptedToHashed(encrypted, counter)
     return hashed
   },
+
   async decrypt(key, encryptedHash) {
-    const { vector, encrypted } = this.hashedToEncryptedAndVector(encryptedHash)
-    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: vector, tagLength: 128 }, key, encrypted)
+    const { counter, encrypted } = this.hashedToEncryptedAndCounter(encryptedHash)
+    const decrypted = await crypto.subtle.decrypt({ name: 'AES-CTR', counter, length: 128 }, key, encrypted)
     const decoded = decode(decrypted)
     return decoded
   },
 }
 
-// KEY RSA
-
-const RSA = {
-  // KEY
+export const RSA = {
   async generateKeyPair() {
     return crypto.subtle.generateKey(
       {
@@ -80,44 +81,49 @@ const RSA = {
       ['encrypt', 'decrypt']
     )
   },
+
   async exportKey(key) {
     return crypto.subtle.exportKey('jwk', key).then((keyObj) => toHash(Buffer.from(JSON.stringify(keyObj))))
   },
+
   async exportKeyPair(keyPair) {
     return {
-      public: await this.exportKey(keyPair.publicKey),
-      private: await this.exportKey(keyPair.privateKey),
+      publicKey: await this.exportKey(keyPair.publicKey),
+      privateKey: await this.exportKey(keyPair.privateKey),
     }
   },
+
   async importKey(hashedKey, keyUsages = ['encrypt']) {
-    let keyObj = JSON.parse(encode(fromHash(hashedKey)))
+    const keyObj = JSON.parse(decode(fromHash(hashedKey)))
     return crypto.subtle.importKey('jwk', keyObj, { name: 'RSA-OAEP', hash: { name: 'SHA-1' } }, true, keyUsages)
   },
+
   async importPublicKey(hashedKey) {
     return this.importKey(hashedKey, ['encrypt'])
   },
+
   async importPrivateKey(hashedKey) {
     return this.importKey(hashedKey, ['decrypt'])
   },
 
-  // Encryption/Decryption
   encryptedToHashed(encrypted) {
     return toHash(Buffer.from(encrypted, 'hex'))
   },
-  hashedToEncryptedAndVector(hashed) {
+
+  hashedToEncrypted(hashed) {
     return Buffer.from(hashed.toString('hex'), 'hex')
   },
+
   async encrypt(publicKey, data) {
     const encrypted = await crypto.subtle.encrypt({ name: 'RSA-OAEP', hash: { name: 'SHA-1' } }, publicKey, encode(data))
     const hashed = this.encryptedToHashed(encrypted)
     return hashed
   },
+
   async decrypt(privateKey, encryptedHash) {
-    const encrypted = this.hashedToEncryptedAndVector(encryptedHash)
+    const encrypted = this.hashedToEncrypted(encryptedHash)
     const decrypted = await crypto.subtle.decrypt({ name: 'RSA-OAEP', hash: { name: 'SHA-1' } }, privateKey, encrypted)
     const decoded = decode(decrypted)
     return decoded
   },
 }
-
-module.exports = { AES, RSA }
