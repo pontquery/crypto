@@ -17,6 +17,10 @@ export class CryptoClient {
     }
   }
 
+  /**
+   * Save the public key provided by the server
+   * @param {*} hashedPublicKey
+   */
   setPublicKey(hashedPublicKey) {
     this.hashedPublicKey = hashedPublicKey
   }
@@ -69,20 +73,52 @@ export class CryptoServer {
     }
   }
 
+  /**
+   * Save the key provided by the client
+   * @param {*} encryptedHashedKey
+   */
   async setKey(encryptedHashedKey) {
     const privateKey = await RSA.importPrivateKey(this.hashedPrivateKey)
     const decryptedKey = await RSA.decrypt(privateKey, encryptedHashedKey)
     this.hashedKey = decryptedKey
   }
 
+  /**
+   * Decrypt body encrypted by the client with the public key
+   * @param {*} encryptedBody 
+   */
   async decryptBody(encryptedBody) {
     const privateKey = await RSA.importPrivateKey(this.hashedPrivateKey)
     return RSA.decrypt(privateKey, encryptedBody)
   }
 
+  /**
+   * Encrypt the body to be sent to the client with the client provided key
+   * @param {*} body 
+   */
   async encryptBody(body) {
     const key = await AES.importKey(this.hashedKey)
     return AES.encrypt(key, body)
+  }
+
+  /**
+   * The hashedUserKey would be provided (after a self decryption from a top level key)
+   * @param {*} hashedUserKey
+   * @param {*} data
+   */
+  async encryptUserData(hashedUserKey, data) {
+    const userKey = await AES.importKey(hashedUserKey)
+    return AES.encrypt(userKey, data)
+  }
+
+  /**
+   * The hashedUserKey would be provided (after a self decryption from a top level key)
+   * @param {*} hashedUserKey
+   * @param {*} encryptedData
+   */
+  async decryptUserData(hashedUserKey, encryptedData) {
+    const userKey = await AES.importKey(hashedUserKey)
+    return AES.decrypt(userKey, encryptedData)
   }
 }
 
